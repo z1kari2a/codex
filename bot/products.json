@@ -1,0 +1,12 @@
+{
+  "categories": [
+    {"id": "clothes", "name": "👕 الملابس"},
+    {"id": "electronics", "name": "💻 الإلكترونيات"},
+    {"id": "bags", "name": "👜 الحقائب"}
+  ],
+  "products": [
+    {"id": "shirt1", "category_id": "clothes", "name": "قميص قطني", "price": "$20", "description": "قميص عالي الجودة"},
+    {"id": "phone1", "category_id": "electronics", "name": "هاتف ذكي", "price": "$300", "description": "هاتف بإمكانيات رائعة"},
+    {"id": "bag1", "category_id": "bags", "name": "حقيبة يد", "price": "$50", "description": "حقيبة أنيقة"}
+  ]
+}

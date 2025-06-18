@@ -22,6 +22,7 @@ if ADMIN_ID:
         ADMIN_ID = None
 
 ASK_NAME, ASK_PHONE = range(2)
+ADD_CATEGORY, ADD_NAME, ADD_PRICE, ADD_DESC = range(2, 6)
 
 ORDERS_FILE = os.path.join(os.path.dirname(__file__), 'orders.json')
 
@@ -80,7 +81,10 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ADMIN_ID is None or update.effective_user.id != ADMIN_ID:
         await update.message.reply_text('غير مصرح لك بالدخول.')
         return
-    keyboard = [[InlineKeyboardButton('🧾 مشاهدة الطلبات', callback_data='admin_orders')]]
+    keyboard = [
+        [InlineKeyboardButton('🧾 مشاهدة الطلبات', callback_data='admin_orders')],
+        [InlineKeyboardButton('➕ إضافة منتج', callback_data='admin_add')],
+    ]
     await update.message.reply_text('لوحة التحكم', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def admin_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,6 +97,54 @@ async def admin_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = 'لا توجد طلبات.'
     await update.callback_query.edit_message_text(text)
+
+async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if ADMIN_ID is None or update.effective_user.id != ADMIN_ID:
+        await update.callback_query.answer('غير مصرح')
+        return ConversationHandler.END
+    keyboard = [
+        [InlineKeyboardButton(cat['name'], callback_data=f"addcat:{cat['id']}")]
+        for cat in DATA['categories']
+    ]
+    await update.callback_query.edit_message_text('اختر تصنيف المنتج:', reply_markup=InlineKeyboardMarkup(keyboard))
+    return ADD_CATEGORY
+
+async def admin_add_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cat_id = update.callback_query.data.split(':')[1]
+    context.user_data['new_prod_cat'] = cat_id
+    await update.callback_query.message.reply_text('اسم المنتج؟', reply_markup=ForceReply(selective=True))
+    return ADD_NAME
+
+async def admin_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['new_prod_name'] = update.message.text
+    await update.message.reply_text('السعر؟', reply_markup=ForceReply(selective=True))
+    return ADD_PRICE
+
+async def admin_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['new_prod_price'] = update.message.text
+    await update.message.reply_text('الوصف؟', reply_markup=ForceReply(selective=True))
+    return ADD_DESC
+
+async def admin_add_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cat_id = context.user_data.get('new_prod_cat')
+    name = context.user_data.get('new_prod_name')
+    price = context.user_data.get('new_prod_price')
+    desc = update.message.text
+
+    product_id = f"{cat_id}_{len([p for p in DATA['products'] if p['category_id'] == cat_id]) + 1}"
+    new_prod = {
+        'id': product_id,
+        'category_id': cat_id,
+        'name': name,
+        'price': price,
+        'description': desc,
+    }
+    DATA['products'].append(new_prod)
+    products_file = os.path.join(os.path.dirname(__file__), 'products.json')
+    with open(products_file, 'w', encoding='utf-8') as f:
+        json.dump(DATA, f, ensure_ascii=False, indent=2)
+    await update.message.reply_text('تمت إضافة المنتج بنجاح')
+    return ConversationHandler.END
 
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prod_id = update.callback_query.data.split(':')[1]
@@ -151,6 +203,19 @@ order_conv = ConversationHandler(
 )
 
 application.add_handler(order_conv)
+
+admin_add_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(admin_add_start, pattern='^admin_add$')],
+    states={
+        ADD_CATEGORY: [CallbackQueryHandler(admin_add_category, pattern='^addcat:')],
+        ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_name)],
+        ADD_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_price)],
+        ADD_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_desc)],
+    },
+    fallbacks=[],
+)
+
+application.add_handler(admin_add_conv)
 
 if __name__ == '__main__':
     application.run_polling()

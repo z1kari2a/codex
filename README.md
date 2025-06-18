@@ -15,6 +15,7 @@ Skeleton project for Telegram store bot.
    python bot/main.py
    ```
 5. Orders will be stored in `bot/orders.json`.
+6. As admin you can add products via `/admin` → "إضافة منتج".
 
 ## Web App
 

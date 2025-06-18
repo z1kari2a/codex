@@ -13,6 +13,13 @@ from telegram.ext import (
 )
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
+ADMIN_ID = os.environ.get("ADMIN_ID")
+
+if ADMIN_ID:
+    try:
+        ADMIN_ID = int(ADMIN_ID)
+    except ValueError:
+        ADMIN_ID = None
 
 ASK_NAME, ASK_PHONE = range(2)
 
@@ -35,6 +42,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton('🌐 زيارة الموقع', url='https://example.com')],
     ]
     await update.message.reply_text('مرحبا بك في متجرنا الإلكتروني', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def show_user_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_orders = [o for o in ORDERS if o.get('user_id') == user_id]
+    if user_orders:
+        lines = [f"{o['product_id']} - {o['name']} ({o['phone']})" for o in user_orders]
+        text = '\n'.join(lines)
+    else:
+        text = 'لا توجد طلبات مسجلة.'
+    await update.callback_query.edit_message_text(text)
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(cat['name'], callback_data=f"cat:{cat['id']}")]
@@ -59,6 +76,24 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = f"{product['name']}\nالسعر: {product['price']}\n{product['description']}"
     await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if ADMIN_ID is None or update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text('غير مصرح لك بالدخول.')
+        return
+    keyboard = [[InlineKeyboardButton('🧾 مشاهدة الطلبات', callback_data='admin_orders')]]
+    await update.message.reply_text('لوحة التحكم', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def admin_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if ADMIN_ID is None or update.effective_user.id != ADMIN_ID:
+        await update.callback_query.answer('غير مصرح')
+        return
+    if ORDERS:
+        lines = [f"{o['product_id']} - {o['name']} ({o['phone']})" for o in ORDERS]
+        text = '\n'.join(lines)
+    else:
+        text = 'لا توجد طلبات.'
+    await update.callback_query.edit_message_text(text)
+
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prod_id = update.callback_query.data.split(':')[1]
     product = next((p for p in DATA['products'] if p['id'] == prod_id), None)
@@ -80,17 +115,31 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text
     product = context.user_data.get('order_product')
     name = context.user_data.get('order_name')
-    ORDERS.append({'product_id': product['id'], 'name': name, 'phone': phone})
+    order = {
+        'product_id': product['id'],
+        'name': name,
+        'phone': phone,
+        'user_id': update.effective_user.id,
+    }
+    ORDERS.append(order)
     with open(ORDERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(ORDERS, f, ensure_ascii=False, indent=2)
     await update.message.reply_text('تم استلام طلبك!')
+    if ADMIN_ID:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"طلب جديد من {name} ({phone}) للمنتج {product['name']}"
+        )
     return ConversationHandler.END
 
 application = ApplicationBuilder().token(TOKEN or 'YOUR_TOKEN').build()
 application.add_handler(CommandHandler('start', start))
+application.add_handler(CommandHandler('admin', admin_menu))
 application.add_handler(CallbackQueryHandler(show_categories, pattern='^categories$'))
 application.add_handler(CallbackQueryHandler(show_products, pattern='^cat:'))
 application.add_handler(CallbackQueryHandler(show_product_detail, pattern='^prod:'))
+application.add_handler(CallbackQueryHandler(show_user_orders, pattern='^orders$'))
+application.add_handler(CallbackQueryHandler(admin_orders, pattern='^admin_orders$'))
 
 order_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(handle_order, pattern='^order:')],

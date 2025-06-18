@@ -1,10 +1,28 @@
 import json
 import os
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (ApplicationBuilder, CallbackQueryHandler, CommandHandler,
-                          ContextTypes)
+from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, Update,
+                      ForceReply)
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
+
+ASK_NAME, ASK_PHONE = range(2)
+
+ORDERS_FILE = os.path.join(os.path.dirname(__file__), 'orders.json')
+
+if os.path.exists(ORDERS_FILE):
+    with open(ORDERS_FILE, 'r', encoding='utf-8') as f:
+        ORDERS = json.load(f)
+else:
+    ORDERS = []
 
 with open(os.path.join(os.path.dirname(__file__), 'products.json'), 'r', encoding='utf-8') as f:
     DATA = json.load(f)
@@ -44,17 +62,46 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prod_id = update.callback_query.data.split(':')[1]
     product = next((p for p in DATA['products'] if p['id'] == prod_id), None)
-    if product:
-        await update.callback_query.answer('تم استلام طلبك!')
-    else:
-        await update.callback_query.answer('حدث خطأ، حاول لاحقاً')
+    if not product:
+        await update.callback_query.answer('حدث خطأ')
+        return ConversationHandler.END
+    context.user_data['order_product'] = product
+    await update.callback_query.message.reply_text('ما اسمك؟', reply_markup=ForceReply(selective=True))
+    return ASK_NAME
+
+
+async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['order_name'] = update.message.text
+    await update.message.reply_text('رقم جوالك؟', reply_markup=ForceReply(selective=True))
+    return ASK_PHONE
+
+
+async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    phone = update.message.text
+    product = context.user_data.get('order_product')
+    name = context.user_data.get('order_name')
+    ORDERS.append({'product_id': product['id'], 'name': name, 'phone': phone})
+    with open(ORDERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(ORDERS, f, ensure_ascii=False, indent=2)
+    await update.message.reply_text('تم استلام طلبك!')
+    return ConversationHandler.END
 
 application = ApplicationBuilder().token(TOKEN or 'YOUR_TOKEN').build()
 application.add_handler(CommandHandler('start', start))
 application.add_handler(CallbackQueryHandler(show_categories, pattern='^categories$'))
 application.add_handler(CallbackQueryHandler(show_products, pattern='^cat:'))
 application.add_handler(CallbackQueryHandler(show_product_detail, pattern='^prod:'))
-application.add_handler(CallbackQueryHandler(handle_order, pattern='^order:'))
+
+order_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(handle_order, pattern='^order:')],
+    states={
+        ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_name)],
+        ASK_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_phone)],
+    },
+    fallbacks=[],
+)
+
+application.add_handler(order_conv)
 
 if __name__ == '__main__':
     application.run_polling()

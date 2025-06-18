@@ -13,3 +13,4 @@ Skeleton project for Telegram store bot.
    ```bash
    python bot/main.py
    ```
+4. Orders will be stored in `bot/orders.json`.
